@@ -18,14 +18,15 @@ def hex_key(item):
 
 
 def sort_and_save(words_list, output_filename):
-    header = ["Core", "Warp", "Addr", "FD", "Fs", "Fe", "D", "I", "OPs", "OPe", "FUs", "FUe", "WB", "End", "Inst"]
-    #Sort option - 1st : Addr, 2nd : Core
-    sorted_words_list = sorted(words_list, key=lambda x: (int(x[3], 16), int(x[0])))
+    header = ["Core", "Warp", "Addr", "FD", "Fs", "Fe", "D", "ID", "I", "OPs", "OPe", "FUs", "FUe", "WB", "End", "Inst"]
+    #Sort option - 1st : Fetch 2nd : Addr, 3rd : Core
+    #Fetch order is fixed 
+    sorted_words_list = sorted(words_list, key=lambda x: (int(x[6]), int(x[3], 16), int(x[0])))
     #sorted_words_list = sorted(words_list, key=hex_key)
     #sorted_words_list = sorted(words_list, key=lambda x: int(x[0]))
     #sorted_words_list = sorted(words_list, key=lambda x: (int(x[2], 16), int(x[0]))) 
     with open(output_filename, 'w') as file:
-        header_output = ' '.join('{:<5}'.format(name) if idx < 4 else '{:<7}'.format(name) for idx, name in enumerate(header))
+        header_output = ' '.join('{:<5}'.format(name) if idx < 4 or idx == 6 or idx == 7 else '{:<7}'.format(name) for idx, name in enumerate(header))
         file.write(header_output + '\n')
 
         inst_cycle_1 = []
@@ -43,7 +44,7 @@ def mark_stall(numbers, inst_cycle_1, inst_cycle_2):
     Addr_idx = 2
     Fs_idx = 3
     I_idx = 6
-    WB_idx = 12
+    WB_idx = 11
 
     marked_numbers = []
 
@@ -56,11 +57,6 @@ def mark_stall(numbers, inst_cycle_1, inst_cycle_2):
                 if diff > 1:
                     if int(numbers[i]) == int(inst_cycle_1[I_idx]):
                         marked_numbers.append("I")
-                    elif int(numbers[i]) == int(inst_cycle_2[I_idx]):
-                        #Check instruction fetched at same time
-                        assert int(inst_cycle_1[Fs_idx]) == int(inst_cycle_2[Fs_idx])
-                        marked_numbers.append("I")
-                        #Control hazard delay 1 Cycle at fetch stage
                     elif int(numbers[i]) == (int(inst_cycle_1[I_idx]) + 1):
                         #Check Hazard
                         assert int(numbers[Addr_idx], 16) != int(inst_cycle_1[Addr_idx], 16) - 8
@@ -81,11 +77,27 @@ def mark_stall(numbers, inst_cycle_1, inst_cycle_2):
                         diff = int(numbers[i + 1]) - int(numbers[i - 1])
                     else:
                         diff = int(numbers[i + 1]) - int(numbers[i])
+                    #Issue index
+                    if i + 1 == I_idx:
+                        if diff <= 1:
+                            marked_numbers.append("X")
+                        else :
+                            # 1 issue/cycle in warp
+                            if int(numbers[i+1]) == int(inst_cycle_1[I_idx]) + 1:
+                                marked_numbers.append("I")
+                            # Check dependency
+                            elif int(numbers[i+1]) == int(inst_cycle_1[WB_idx]):
+                                marked_numbers.append("W")
+                            elif int(numbers[i+1]) == int(inst_cycle_2[WB_idx]):
+                                marked_numbers.append("W")
+                            else : 
+                                marked_numbers.append("?")
 
-                    if diff <= 1:
-                        marked_numbers.append(" ")
-                    else:
-                        marked_numbers.append("*")
+                    else :
+                        if diff <= 1:
+                            marked_numbers.append(" ")
+                        else:
+                            marked_numbers.append("*")
                 except ValueError:
                     marked_numbers.append(" ")
 
