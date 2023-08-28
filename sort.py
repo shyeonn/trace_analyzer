@@ -6,6 +6,10 @@ MAX_CYCLE_WITDH = 5
 MAX_DIFF_WITDH = 5
 MAX_INF_WITDH = 3
 
+L1_LATENCY = 20
+L2_LATENCY = 160
+INTER_LATENCY = 8
+
 class Position(Enum):
       Core  = 0
       Warp = auto()
@@ -40,26 +44,35 @@ def sort_lines(lines):
 
 
 #Help to get register index in the line list
-def get_idx(line):
-    out_idx = Position.latency + 1
-    outcount = inform[out_idx]
+def get_out_idx(line):
+    out_idx = Position.latency.value + 1
 
-    in_idx = out_idx + outcount + 1
-    inst_idx = in_idx + incount + 1
+    return out_idx
 
-    return out_idx, in_idx, inst_idx
+def get_in_idx(line):
+    out_idx = get_out_idx(line)
+    outcount = int(line[out_idx])
+
+    return out_idx + outcount + 1
+    
+
+def get_inst_idx(line):
+    in_idx = get_in_idx(line)
+    incount = int(line[in_idx])
+
+    return in_idx + incount + 1
+
+
 
 
 def sort_and_save(lines, output_filename):
     lines = sort_lines(lines)
 
     with open(output_filename, 'w') as file:
-#        header_output = ' '.join('{:<8}'.format(name) if idx == 4 or idx == 5 or idx == 8 or idx == 9 else '{:<6}'.format(name) for idx, name in enumerate(header))
-#        file.write(header_output + '\n')
 
         line_p = []
-        for line in lines:
-            inst_cycle = mark_stall(line, line_p)
+        for idx, line in enumerate(lines):
+            inst_cycle = mark_stall(line, idx, lines)
             
             formatted_output = ' '.join(inst_cycle) + '\n'
             file.write(formatted_output)
@@ -68,7 +81,7 @@ def sort_and_save(lines, output_filename):
             #file.write(' '.join(inform) + '\n')
 
     
-def mark_stall(inst_cycle, inst_cycle_p):
+def mark_stall(inst_cycle, idx, inst_cycles):
 
     inst_cycle_m = []
 
@@ -95,14 +108,14 @@ def mark_stall(inst_cycle, inst_cycle_p):
         #Check Fetch stall for inter dependency
         if i == Position.Fs.value:
             #Issue 
-            if len(inst_cycle_p) :
-                if int(inst_cycle[i]) == int(inst_cycle_p[Position.Fs.value]):
+            if idx != 0 :
+                if int(inst_cycle[i]) == int(inst_cycles[idx-1][Position.Fs.value]):
                     inst_cycle_m.append("X")
-                elif int(inst_cycle[i]) == int(inst_cycle_p[Position.I.value]):
+                elif int(inst_cycle[i]) == int(inst_cycles[idx-1][Position.I.value]):
                     inst_cycle_m.append("I")
-                elif int(inst_cycle[i]) == (int(inst_cycle_p[Position.I.value]) + 1):
+                elif int(inst_cycle[i]) == (int(inst_cycles[idx-1][Position.I.value]) + 1):
                     #Check Hazard
-                    assert int(inst_cycle[Position.Addr.value], 16) != int(inst_cycle_p[Position.Addr.value], 16) - 8
+                    assert int(inst_cycle[Position.Addr.value], 16) != int(inst_cycles[idx-1][Position.Addr.value], 16) - 8
                     inst_cycle_m.append("H")
                 else:
                     inst_cycle_m.append("?")
@@ -114,33 +127,29 @@ def mark_stall(inst_cycle, inst_cycle_p):
         if __debug__:
             if i != Position.C.value:
                 inst_cycle_m.append(("+" + str(diff)).rjust(MAX_DIFF_WITDH))
+         
+        if i == Position.D.value:
+            if idx != 0 and diff > 1:
+                if int(inst_cycle[i+1]) == int(inst_cycles[idx-1][Position.WB.value]) \
+                        or int(inst_cycle[i+1]) == int(inst_cycles[idx-2][Position.WB.value]):
+                    inst_cycle_m.append("W")
+                elif int(inst_cycle[i+1]) == int(inst_cycles[idx-1][Position.I.value])+1:
+                    inst_cycle_m.append("I")
+                else:
+                    inst_cycle_m.append("?")
+            else :
+                inst_cycle_m.append("X")
+
+        if i == Position.OPs.value:
+            if bool(get_in_idx(inst_cycle)) != bool(diff) : 
+                inst_cycle_m.append("?")
+            elif diff > 2 :
+                inst_cycle_m.append("l")
+            else :
+                inst_cycle_m.append(" ")
+            
         
 
-#        if i > 2:
-#            if i + 1 < len(numbers):
-#                try:
-#                    if numbers[i] == "0":
-#                        diff = 0
-#                    elif numbers[i+1] == "0":
-#                        diff = int(numbers[i + 2]) - int(numbers[i])
-#                    else:
-#                        diff = int(numbers[i + 1]) - int(numbers[i])
-#
-#                    #Issue index
-#                    if i + 1 == I_idx:
-#                        if diff <= 1:
-#                            marked_numbers.append("X")
-#                        else :
-#                            # 1 issue/cycle in warp
-#                            if int(numbers[i+1]) == int(inst_cycle_1[I_idx]) + 1:
-#                                marked_numbers.append("I")
-#                            # Check dependency
-#                            elif int(numbers[i+1]) == int(inst_cycle_1[WB_idx]):
-#                                marked_numbers.append("W")
-#                            elif int(numbers[i+1]) == int(inst_cycle_2[WB_idx]):
-#                                marked_numbers.append("W")
-#                            else : 
-#                                marked_numbers.append("?")
 #                    #Fs index
 #                    elif i + 1 == FUs_idx :
 ##                        if diff == 2 :
