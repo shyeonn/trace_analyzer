@@ -1,5 +1,6 @@
 import sys
 import copy
+import argparse
 from enum import Enum, auto
 
 MAX_CYCLE_WITDH = 5
@@ -9,6 +10,7 @@ MAX_INF_WITDH = 3
 L1_LATENCY = 20
 L2_LATENCY = 160
 INTER_LATENCY = 8
+
 
 class Position(Enum):
       Core  = 0
@@ -65,25 +67,45 @@ def get_inst_idx(line):
 
 
 
-def sort_and_save(lines, output_filename):
+def sort_and_save(lines, output_filename, args):
     lines = sort_lines(lines)
 
     with open(output_filename, 'w') as file:
 
         line_p = []
         for idx, line in enumerate(lines):
-            inst_cycle = mark_stall(line, idx, lines)
+
+            inst_cycle = mark_stall(line, idx, lines, args)
             
-            formatted_output = ' '.join(inst_cycle) + '\n'
+            formatted_output = ' '.join(inst_cycle) + ' '
             file.write(formatted_output)
             line_p = line
 
-            #file.write(' '.join(inform) + '\n')
+            if args.latency :
+                file.write(line[Position.latency.value] + ' ')
 
+            if args.inst :
+                inst = line[get_inst_idx(line):]
+                file.write(' '.join(inst) + '\n')
+            else :
+                file.write('\n')
+
+
+def get_op(line):
+    inst_idx = get_inst_idx(line)
+    inst = line[inst_idx]
     
-def mark_stall(inst_cycle, idx, inst_cycles):
+    if(inst[0] == "@") :
+        inst = line[inst_idx + 1]
 
-    inst_cycle_m = []
+    return inst
+
+
+def mark_stall(inst_cycle, idx, inst_cycles, args):
+
+    op = get_op(inst_cycle)
+
+    inst_cycle_m = [] 
 
     #Insert Core_idx, Warp_idx, Addr
     for i in range(0, Position.Addr.value + 1):
@@ -124,7 +146,7 @@ def mark_stall(inst_cycle, idx, inst_cycles):
 
         inst_cycle_m.append(str(inst_cycle[i]).rjust(MAX_CYCLE_WITDH))
 
-        if __debug__:
+        if args.diff:
             if i != Position.C.value:
                 inst_cycle_m.append(("+" + str(diff)).rjust(MAX_DIFF_WITDH))
          
@@ -141,43 +163,51 @@ def mark_stall(inst_cycle, idx, inst_cycles):
                 inst_cycle_m.append("X")
 
         if i == Position.OPs.value:
-            if bool(get_in_idx(inst_cycle)) != bool(diff) : 
+            op_split = op.split('.')
+            if bool(int(inst_cycle[get_in_idx(inst_cycle)])) != bool(diff) :
+                if op_split[0] == "ld":
+                    if op_split[1] != "param":
+                        inst_cycle_m.append(" ")
+                        continue
                 inst_cycle_m.append("?")
             elif diff > 2 :
                 inst_cycle_m.append("l")
             else :
                 inst_cycle_m.append(" ")
-            
-        
 
-#                    #Fs index
-#                    elif i + 1 == FUs_idx :
-##                        if diff == 2 :
-##                            marked_numbers.append("*")
-##                        else :
-#                        marked_numbers.append("+" + str(diff))
-#                    elif i + 1 == FUe_idx :
-#                        marked_numbers.append("+" + str(diff+1))
-#
-#                    else :
-#                        if diff <= 1:
-#                            marked_numbers.append(" ")
-#                        else:
-#                            marked_numbers.append("*")
-#                except ValueError:
-#                    marked_numbers.append(" ")
+        if i == Position.FUs.value:
+            op_core = op.split('.')[0]
+            if op_core != "ld" and op_core != "st":
+                if diff == int(inst_cycle[Position.latency.value]) + 1:
+                    inst_cycle_m.append("O")
+                else:
+                    inst_cycle_m.append("?")
+            else :
+                if diff == int(inst_cycle[Position.latency.value]):
+                    inst_cycle_m.append("O")
+                else:
+                    inst_cycle_m.append("?")
+
+
+            
     return inst_cycle_m
 
 def main():
-    if len(sys.argv) != 3:
-        print("Usage: python script.py input_filename output_filename")
-        return
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--diff', action='store_true', help='Show cycle diff')
+    parser.add_argument('--inst', action='store_true', help='Show instruction')
+    parser.add_argument('--latency', action='store_true', help='Show latency')
+    parser.add_argument('input_filename', help='Input filename')
+    parser.add_argument('output_filename', help='Output filename')
 
-    input_filename = sys.argv[1]
-    output_filename = sys.argv[2]
+    args = parser.parse_args()
+
+
+    input_filename = args.input_filename
+    output_filename = args.output_filename
 
     words_list = read_file(input_filename)
-    sort_and_save(words_list, output_filename)
+    sort_and_save(words_list, output_filename, args)
     print("Sorting completed. Result saved to", output_filename)
 
 if __name__ == "__main__":
