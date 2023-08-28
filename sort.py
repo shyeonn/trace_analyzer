@@ -1,27 +1,27 @@
 import sys
 import copy
-from enum import Enum
+from enum import Enum, auto
 
 MAX_CYCLE_WITDH = 5
-MAX_DIFF_WITDH = 3
+MAX_DIFF_WITDH = 5
 MAX_INF_WITDH = 3
 
 class Position(Enum):
-      Core = 0
-      Warp
-      Addr
-      Fs
-      Fe
-      D
-      I
-      OPs
-      OPe
-      FUs
-      MemI
-      FUe
-      WB
-      C
-      latency
+      Core  = 0
+      Warp = auto()
+      Addr = auto()
+      Fs = auto()
+      Fe = auto()
+      D = auto()
+      I = auto()
+      OPs = auto()
+      OPe = auto()
+      FUs = auto()
+      MemI = auto()
+      FUe = auto()
+      WB = auto()
+      C = auto()
+      latency = auto()
 
 
 def read_file(filename):
@@ -34,8 +34,8 @@ def read_file(filename):
 
 def sort_lines(lines):
     #Sort option - 1st : Fetch 2nd : Addr, 3rd : Core
-    sorted_lines = sorted(lines, key=lambda x: (int(x[Position.Fs]), 
-        int(x[Position.Addr], 16), int(x[Position.Core])))
+    sorted_lines = sorted(lines, key=lambda x: (int(x[Position.Fs.value]), 
+        int(x[Position.Addr.value], 16), int(x[Position.Core.value])))
     return sorted_lines
 
 
@@ -57,13 +57,15 @@ def sort_and_save(lines, output_filename):
 #        header_output = ' '.join('{:<8}'.format(name) if idx == 4 or idx == 5 or idx == 8 or idx == 9 else '{:<6}'.format(name) for idx, name in enumerate(header))
 #        file.write(header_output + '\n')
 
+        line_p = []
         for line in lines:
-            inst_cycle = mark_stall(line)
+            inst_cycle = mark_stall(line, line_p)
             
-            formatted_output = ' '.join('{:<0}'.format(name) if name == " "  else '{:<6}'.format(name) for idx, name in enumerate(words_m))
+            formatted_output = ' '.join(inst_cycle) + '\n'
             file.write(formatted_output)
+            line_p = line
 
-            file.write(' '.join(inform) + '\n')
+            #file.write(' '.join(inform) + '\n')
 
     
 def mark_stall(inst_cycle, inst_cycle_p):
@@ -71,33 +73,36 @@ def mark_stall(inst_cycle, inst_cycle_p):
     inst_cycle_m = []
 
     #Insert Core_idx, Warp_idx, Addr
-    for i in range(0, Position.Fs):
-        inst_cycle_m.append(str(inst_cycle[i]).rjust(MAX_INF_WITDH))
+    for i in range(0, Position.Addr.value + 1):
+        inst_cycle_m.append(inst_cycle[i].rjust(MAX_INF_WITDH))
+  
 
     #Insert Cycle
-    for i in range(Position.Fs, Position.C + 1):
+    for i in range(Position.Fs.value, Position.C.value + 1):
 
         # Get Stall length
-        if int(inst_cycle[i+1]) != 0 and int(inst_cycle[i]) != 0 :
+        if int(inst_cycle[i]) != 0 :
             if int(inst_cycle[i+1]) != 0 :
                 diff = int(inst_cycle[i+1]) - int(inst_cycle[i])
             else :
                 j = 1
-                while(int(inst_cycle[i + j])):
-                    pass
-                diff = int(inst_cycle[i + 1 + j]) - int(inst_cycle[i])
+                while not int(inst_cycle[i + j]):
+                    j += 1
+                diff = int(inst_cycle[i + j]) - int(inst_cycle[i])
         else :
             diff = 0 
         
         #Check Fetch stall for inter dependency
-        if i == Position.Fs:
+        if i == Position.Fs.value:
             #Issue 
-            if diff > 1:
-                if int(inst_cycle[i]) == int(inst_cycle_p[I_idx]):
+            if len(inst_cycle_p) :
+                if int(inst_cycle[i]) == int(inst_cycle_p[Position.Fs.value]):
+                    inst_cycle_m.append("X")
+                elif int(inst_cycle[i]) == int(inst_cycle_p[Position.I.value]):
                     inst_cycle_m.append("I")
-                elif int(inst_cycle[i]) == (int(inst_cycle_p[I_idx]) + 1):
+                elif int(inst_cycle[i]) == (int(inst_cycle_p[Position.I.value]) + 1):
                     #Check Hazard
-                    assert int(inst_cycle[Addr_idx], 16) != int(inst_cycle_1[Addr_idx], 16) - 8
+                    assert int(inst_cycle[Position.Addr.value], 16) != int(inst_cycle_p[Position.Addr.value], 16) - 8
                     inst_cycle_m.append("H")
                 else:
                     inst_cycle_m.append("?")
@@ -106,7 +111,9 @@ def mark_stall(inst_cycle, inst_cycle_p):
 
         inst_cycle_m.append(str(inst_cycle[i]).rjust(MAX_CYCLE_WITDH))
 
-        inst_cycle_m.append("+" + str(diff).rjust(MAX_DIFF_WITDH))
+        if __debug__:
+            if i != Position.C.value:
+                inst_cycle_m.append(("+" + str(diff)).rjust(MAX_DIFF_WITDH))
         
 
 #        if i > 2:
