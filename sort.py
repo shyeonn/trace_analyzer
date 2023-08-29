@@ -4,7 +4,7 @@ import argparse
 from enum import Enum, auto
 
 MAX_CYCLE_WITDH = 5
-MAX_DIFF_WITDH = 5
+MAX_DIFF_WITDH = 4
 MAX_INF_WITDH = 3
 
 L1_LATENCY = 20
@@ -28,6 +28,11 @@ class Position(Enum):
       WB = auto()
       C = auto()
       latency = auto()
+
+class Cache(Enum):
+    L1D = 0
+    L2 = auto()
+
 
 
 def read_file(filename):
@@ -58,12 +63,15 @@ def get_in_idx(line):
     return out_idx + outcount + 1
     
 
-def get_inst_idx(line):
+def get_cache_idx(line):
     in_idx = get_in_idx(line)
     incount = int(line[in_idx])
 
     return in_idx + incount + 1
 
+
+def get_inst_idx(line):
+    return get_cache_idx(line) + len(Cache)
 
 
 
@@ -175,22 +183,55 @@ def mark_stall(inst_cycle, idx, inst_cycles, args):
             else :
                 inst_cycle_m.append(" ")
 
+        if i == Position.OPe.value:
+            if int(inst_cycle[i+1]) == int(inst_cycles[idx-1][Position.MemI.value]) and diff > 0:
+                inst_cycle_m.append("M")
+            else :
+                inst_cycle_m.append(" ")
+
         if i == Position.FUs.value:
             op_core = op.split('.')[0]
             if op_core != "ld" and op_core != "st":
                 if diff == int(inst_cycle[Position.latency.value]) + 1:
-                    inst_cycle_m.append("O")
+                    inst_cycle_m.append(" ")
                 else:
                     inst_cycle_m.append("?")
             else :
                 if diff == int(inst_cycle[Position.latency.value]):
-                    inst_cycle_m.append("O")
+                    inst_cycle_m.append(" ")
                 else:
-                    inst_cycle_m.append("?")
+                    inst_cycle_m.append("C")
 
-
-            
+        if i == Position.MemI.value:
+            #Check only st instruction
+            if inst_cycle[Position.MemI.value] != '0' and diff != 0:
+                if op.split('.')[1] == "global" :
+                    if cal_latency(inst_cycle) == diff :
+                        inst_cycle_m.append(" ")
+                    else :
+                        inst_cycle_m.append("?")
+#                else :
+#                    if 0 == inst_cycle[Position.MemI.value] :
+#                        inst_cycle_m.append("O")
+#                    else :
+#                        inst_cycle_m.append("?")
+            else :
+                inst_cycle_m.append(" ")
+                
     return inst_cycle_m
+
+def cal_latency(line) :
+    latency = L1_LATENCY
+
+    cache_idx = get_cache_idx(line)
+    if line[cache_idx] == "1" :# Is L1D MISS
+        latency += L2_LATENCY + INTER_LATENCY
+    #if line[cache_idx + 1] == "1" :
+    print(latency)
+
+    return latency
+
+
 
 def main():
     parser = argparse.ArgumentParser()
