@@ -7,6 +7,8 @@ MAX_CYCLE_WITDH = 5
 MAX_DIFF_WITDH = 4
 MAX_INF_WITDH = 3
 
+MAX_WARP_SIZE = 32
+
 L1_LATENCY = 20
 L2_LATENCY = 160
 INTER_LATENCY = 8
@@ -45,8 +47,14 @@ def read_file(filename):
 
 def sort_lines(lines):
     #Sort option - 1st : Fetch 2nd : Addr, 3rd : Core
-    sorted_lines = sorted(lines, key=lambda x: (int(x[Position.Fs.value]), 
-        int(x[Position.Addr.value], 16), int(x[Position.Core.value])))
+#    sorted_lines = sorted(lines, key=lambda x: (int(x[Position.Fs.value]), 
+#        int(x[Position.Addr.value], 16), int(x[Position.Core.value])))
+    sorted_lines = sorted(lines, key=lambda x: (
+        int(x[Position.Fs.value]), 
+#        int(x[Position.Addr.value], 16),
+#        int(x[Position.Core.value]), 
+#        int(x[Position.Warp.value]),
+        ))
     return sorted_lines
 
 
@@ -75,28 +83,54 @@ def get_inst_idx(line):
 
 
 
+class classified_list:
+    def __init__(self):
+        self.matrix = []
+        self.create_matrix(MAX_WARP_SIZE)
+    
+    def create_matrix(self, row_size):
+        for i in range(row_size):
+            row = []  
+            self.matrix.append(row)
+    
+    def add(self, warp_idx, cycle_list):
+        self.matrix[warp_idx].append(cycle_list)
+
+    def intra_search(self, warp_idx, value, position, width = 0):
+        if width :
+            lines = self.matrix[warp_idx][-2 : -1 * width -2  : -1]
+        else :
+            lines = self.matrix[warp_idx][::-1]
+
+        for line in lines :
+            if int(line[position]) == value :
+                return line
+
+        return False
+
+
 def sort_and_save(lines, output_filename, args):
     lines = sort_lines(lines)
 
     with open(output_filename, 'w') as file:
+        warp_cycle_list = classified_list()
 
-        line_p = []
         for idx, line in enumerate(lines):
+            if line[Position.Core.value] == '0' :
 
-            inst_cycle = mark_stall(line, idx, lines, args)
-            
-            formatted_output = ' '.join(inst_cycle) + ' '
-            file.write(formatted_output)
-            line_p = line
+                inst_cycle = mark_stall(line, idx, lines, args, warp_cycle_list)
+                
+                formatted_output = ' '.join(inst_cycle) + ' '
+                file.write(formatted_output)
 
-            if args.latency :
-                file.write(line[Position.latency.value] + ' ')
+                if args.latency :
+                    file.write(line[Position.latency.value] + ' ')
 
-            if args.inst :
-                inst = line[get_inst_idx(line):]
-                file.write(' '.join(inst) + '\n')
-            else :
-                file.write('\n')
+                if args.inst :
+                    inst = line[get_inst_idx(line):]
+                    file.write(' '.join(inst) + '\n')
+                else :
+                    file.write('\n')
 
 
 def get_op(line):
@@ -109,9 +143,12 @@ def get_op(line):
     return inst
 
 
-def mark_stall(inst_cycle, idx, inst_cycles, args):
+def mark_stall(inst_cycle, idx, inst_cycles, args, warp_cycle_list):
 
     op = get_op(inst_cycle)
+    warp_idx = int(inst_cycle[Position.Warp.value])
+
+    warp_cycle_list.add(warp_idx, inst_cycle)
 
     inst_cycle_m = [] 
 
@@ -138,15 +175,16 @@ def mark_stall(inst_cycle, idx, inst_cycles, args):
         #Check Fetch stall for inter dependency
         if i == Position.Fs.value:
             #Issue 
-            if idx != 0 :
-                if int(inst_cycle[i]) == int(inst_cycles[idx-1][Position.Fs.value]):
+            if inst_cycle[Position.Addr.value] != '0' :
+                Fs_cycle = int(inst_cycle[i])
+                if warp_cycle_list.intra_search(warp_idx, Fs_cycle, Position.Fs.value, 1):
                     inst_cycle_m.append("X")
-                elif int(inst_cycle[i]) == int(inst_cycles[idx-1][Position.I.value]):
+                elif warp_cycle_list.intra_search(warp_idx, Fs_cycle, Position.I.value, 1):
                     inst_cycle_m.append("I")
-                elif int(inst_cycle[i]) == (int(inst_cycles[idx-1][Position.I.value]) + 1):
                     #Check Hazard
-                    assert int(inst_cycle[Position.Addr.value], 16) != int(inst_cycles[idx-1][Position.Addr.value], 16) - 8
-                    inst_cycle_m.append("H")
+#                    if int(inst_cycle[Position.Addr.value], 16) != \
+#                    int(inst_cycles[idx-1][Position.Addr.value], 16) - 8 :
+                    #inst_cycle_m.append("H")
                 else:
                     inst_cycle_m.append("?")
             else :
@@ -217,6 +255,10 @@ def mark_stall(inst_cycle, idx, inst_cycles, args):
 #                        inst_cycle_m.append("?")
             else :
                 inst_cycle_m.append(" ")
+
+        if i == Position.FUe.value or i == Position.WB.value :
+            if diff > 1 :
+                inst_cycle_m.append("?")
                 
     return inst_cycle_m
 
@@ -227,7 +269,6 @@ def cal_latency(line) :
     if line[cache_idx] == "1" :# Is L1D MISS
         latency += L2_LATENCY + INTER_LATENCY
     #if line[cache_idx + 1] == "1" :
-    print(latency)
 
     return latency
 
