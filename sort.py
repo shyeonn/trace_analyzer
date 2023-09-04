@@ -14,7 +14,7 @@ L2_LATENCY = 160
 INTER_LATENCY = 8
 
 
-class Position(Enum):
+class p_check(Enum):
       Core  = 0
       Warp = auto()
       Addr = auto()
@@ -29,13 +29,12 @@ class Position(Enum):
       FUe = auto()
       WB = auto()
       C = auto()
-      latency = auto()
 
-class Cache(Enum):
-    L1D = 0
+class p_stall(Enum):
+    L1D = len(p_check)
     L2 = auto()
-
-
+    Pipe = auto()
+    
 
 def read_file(filename):
     with open(filename, 'r') as file:
@@ -47,20 +46,24 @@ def read_file(filename):
 
 def sort_lines(lines):
     #Sort option - 1st : Fetch 2nd : Addr, 3rd : Core
-#    sorted_lines = sorted(lines, key=lambda x: (int(x[Position.Fs.value]), 
-#        int(x[Position.Addr.value], 16), int(x[Position.Core.value])))
+#    sorted_lines = sorted(lines, key=lambda x: (int(x[p_check.Fs.value]), 
+#        int(x[p_check.Addr.value], 16), int(x[p_check.Core.value])))
     sorted_lines = sorted(lines, key=lambda x: (
-        int(x[Position.Fs.value]), 
-#        int(x[Position.Addr.value], 16),
-#        int(x[Position.Core.value]), 
-#        int(x[Position.Warp.value]),
+        int(x[p_check.Fs.value]), 
+#        int(x[p_check.Core.value]), 
+        int(x[p_check.Warp.value]),
+        int(x[p_check.Addr.value], 16),
         ))
     return sorted_lines
 
+def get_latency_idx(line):
+    latency_idx = len(p_check) + len(p_stall)
+    
+    return latency_idx
 
 #Help to get register index in the line list
 def get_out_idx(line):
-    out_idx = Position.latency.value + 1
+    out_idx = get_latency_idx(line) + 1
 
     return out_idx
 
@@ -71,15 +74,8 @@ def get_in_idx(line):
     return out_idx + outcount + 1
     
 
-def get_cache_idx(line):
-    in_idx = get_in_idx(line)
-    incount = int(line[in_idx])
-
-    return in_idx + incount + 1
-
-
 def get_inst_idx(line):
-    return get_cache_idx(line) + len(Cache)
+    return get_in_idx(line) + 1
 
 
 
@@ -96,17 +92,23 @@ class classified_list:
     def add(self, warp_idx, cycle_list):
         self.matrix[warp_idx].append(cycle_list)
 
-    def intra_search(self, warp_idx, value, position, width = 0):
+    def intra_search(self, warp_idx, value, position, width = 0, base = 10):
         if width :
             lines = self.matrix[warp_idx][-2 : -1 * width -2  : -1]
         else :
             lines = self.matrix[warp_idx][::-1]
 
         for line in lines :
-            if int(line[position]) == value :
+            if int(line[position], base) == value :
                 return line
 
         return False
+    
+    def is_empty(self) :
+        if self.matrix.count == 0 :
+            return True
+        else :
+            return False
 
 
 def sort_and_save(lines, output_filename, args):
@@ -116,7 +118,7 @@ def sort_and_save(lines, output_filename, args):
         warp_cycle_list = classified_list()
 
         for idx, line in enumerate(lines):
-            if line[Position.Core.value] == '0' :
+            if line[p_check.Core.value] == '0' and line[p_check.Warp.value] == '0':
 
                 inst_cycle = mark_stall(line, idx, lines, args, warp_cycle_list)
                 
@@ -124,7 +126,7 @@ def sort_and_save(lines, output_filename, args):
                 file.write(formatted_output)
 
                 if args.latency :
-                    file.write(line[Position.latency.value] + ' ')
+                    file.write(line[get_latency_idx(line)] + ' ')
 
                 if args.inst :
                     inst = line[get_inst_idx(line):]
@@ -146,19 +148,19 @@ def get_op(line):
 def mark_stall(inst_cycle, idx, inst_cycles, args, warp_cycle_list):
 
     op = get_op(inst_cycle)
-    warp_idx = int(inst_cycle[Position.Warp.value])
+    warp_idx = int(inst_cycle[p_check.Warp.value])
 
     warp_cycle_list.add(warp_idx, inst_cycle)
 
     inst_cycle_m = [] 
 
     #Insert Core_idx, Warp_idx, Addr
-    for i in range(0, Position.Addr.value + 1):
+    for i in range(0, p_check.Addr.value + 1):
         inst_cycle_m.append(inst_cycle[i].rjust(MAX_INF_WITDH))
   
 
     #Insert Cycle
-    for i in range(Position.Fs.value, Position.C.value + 1):
+    for i in range(p_check.Fs.value, p_check.C.value + 1):
 
         # Get Stall length
         if int(inst_cycle[i]) != 0 :
@@ -173,42 +175,51 @@ def mark_stall(inst_cycle, idx, inst_cycles, args, warp_cycle_list):
             diff = 0 
         
         #Check Fetch stall for inter dependency
-        if i == Position.Fs.value:
+        if i == p_check.Fs.value:
             #Issue 
-            if inst_cycle[Position.Addr.value] != '0' :
+            if inst_cycle[p_check.Addr.value] != '0' :
                 Fs_cycle = int(inst_cycle[i])
-                if warp_cycle_list.intra_search(warp_idx, Fs_cycle, Position.Fs.value, 1):
+                #Check for data hazard
+                prev_addr = int(inst_cycle[p_check.Addr.value], 16) - 8
+                if warp_cycle_list.intra_search(warp_idx, Fs_cycle, p_check.Fs.value, 1):
                     inst_cycle_m.append("X")
-                elif warp_cycle_list.intra_search(warp_idx, Fs_cycle, Position.I.value, 1):
+                elif warp_cycle_list.intra_search(warp_idx, Fs_cycle, p_check.I.value, 1):
                     inst_cycle_m.append("I")
                     #Check Hazard
-#                    if int(inst_cycle[Position.Addr.value], 16) != \
-#                    int(inst_cycles[idx-1][Position.Addr.value], 16) - 8 :
-                    #inst_cycle_m.append("H")
+                elif not warp_cycle_list.intra_search(warp_idx, prev_addr, p_check.Addr.value, 1, 16):
+                    inst_cycle_m.append("H")
                 else:
-                    inst_cycle_m.append("?")
+                    inst_cycle_m.append("N")
             else :
                 inst_cycle_m.append("X")
 
         inst_cycle_m.append(str(inst_cycle[i]).rjust(MAX_CYCLE_WITDH))
 
         if args.diff:
-            if i != Position.C.value:
+            if i != p_check.C.value:
                 inst_cycle_m.append(("+" + str(diff)).rjust(MAX_DIFF_WITDH))
          
-        if i == Position.D.value:
-            if idx != 0 and diff > 1:
-                if int(inst_cycle[i+1]) == int(inst_cycles[idx-1][Position.WB.value]) \
-                        or int(inst_cycle[i+1]) == int(inst_cycles[idx-2][Position.WB.value]):
-                    inst_cycle_m.append("W")
-                elif int(inst_cycle[i+1]) == int(inst_cycles[idx-1][Position.I.value])+1:
+        if i == p_check.D.value:
+            if not warp_cycle_list.is_empty() and diff > 1:
+                I_cycle = int(inst_cycle[i+1])
+                if int(inst_cycle[p_stall.Pipe.value]) == True:
+                    inst_cycle_m.append("P")
+                elif warp_cycle_list.intra_search(warp_idx, I_cycle - 1, p_check.I.value, 1):
                     inst_cycle_m.append("I")
+                elif warp_cycle_list.intra_search(warp_idx, I_cycle, p_check.WB.value, 2):
+                    inst_cycle_m.append("W")
                 else:
                     inst_cycle_m.append("?")
             else :
                 inst_cycle_m.append("X")
+        
+        if i == p_check.I.value:
+            if diff > 1 :
+                inst_cycle_m.append("F")
+            else :
+                inst_cycle_m.append(" ")
 
-        if i == Position.OPs.value:
+        if i == p_check.OPs.value:
             op_split = op.split('.')
             if bool(int(inst_cycle[get_in_idx(inst_cycle)])) != bool(diff) :
                 if op_split[0] == "ld":
@@ -221,54 +232,53 @@ def mark_stall(inst_cycle, idx, inst_cycles, args, warp_cycle_list):
             else :
                 inst_cycle_m.append(" ")
 
-        if i == Position.OPe.value:
-            if int(inst_cycle[i+1]) == int(inst_cycles[idx-1][Position.MemI.value]) and diff > 0:
+        if i == p_check.OPe.value:
+            if int(inst_cycle[i+1]) == int(inst_cycles[idx-1][p_check.MemI.value]) and diff > 0:
                 inst_cycle_m.append("M")
             else :
                 inst_cycle_m.append(" ")
 
-        if i == Position.FUs.value:
+        if i == p_check.FUs.value:
             op_core = op.split('.')[0]
             if op_core != "ld" and op_core != "st":
-                if diff == int(inst_cycle[Position.latency.value]) + 1:
+                if diff == int(inst_cycle[get_latency_idx(inst_cycle)]) + 1:
                     inst_cycle_m.append(" ")
                 else:
                     inst_cycle_m.append("?")
             else :
-                if diff == int(inst_cycle[Position.latency.value]):
+                if diff == int(inst_cycle[get_latency_idx(inst_cycle)]):
                     inst_cycle_m.append(" ")
                 else:
                     inst_cycle_m.append("C")
 
-        if i == Position.MemI.value:
+        if i == p_check.MemI.value:
             #Check only st instruction
-            if inst_cycle[Position.MemI.value] != '0' and diff != 0:
+            if inst_cycle[p_check.MemI.value] != '0' and diff != 0:
                 if op.split('.')[1] == "global" :
-                    if cal_latency(inst_cycle) == diff :
+                    if cal_cache_latency(inst_cycle) == diff :
                         inst_cycle_m.append(" ")
                     else :
                         inst_cycle_m.append("?")
 #                else :
-#                    if 0 == inst_cycle[Position.MemI.value] :
+#                    if 0 == inst_cycle[p_check.MemI.value] :
 #                        inst_cycle_m.append("O")
 #                    else :
 #                        inst_cycle_m.append("?")
             else :
                 inst_cycle_m.append(" ")
 
-        if i == Position.FUe.value or i == Position.WB.value :
+        if i == p_check.FUe.value or i == p_check.WB.value :
             if diff > 1 :
                 inst_cycle_m.append("?")
                 
     return inst_cycle_m
 
-def cal_latency(line) :
+def cal_cache_latency(line) :
     latency = L1_LATENCY
 
-    cache_idx = get_cache_idx(line)
-    if line[cache_idx] == "1" :# Is L1D MISS
+    if line[p_stall.L1D.value] == "1" :# Is L1D MISS
         latency += L2_LATENCY + INTER_LATENCY
-    #if line[cache_idx + 1] == "1" :
+    #if line[p_stall.L2.value] == "1" :
 
     return latency
 
